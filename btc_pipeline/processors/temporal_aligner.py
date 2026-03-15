@@ -3,12 +3,13 @@ Temporal Aligner
 Aligne toutes les sources de données sur la résolution 1 seconde.
 Gère les différentes fréquences via forward-fill et interpolation.
 
+v2: UTXO loader supprimé (snapshots UTXO retirés du pipeline).
+
 Sources et résolutions :
   - aggTrades → 1s (natif après agrégation)
   - klines 1m → 60s (validation + backup)
   - Blockchain blocs → ~600s (forward-fill)
   - Mempool → ~60s (forward-fill)
-  - UTXO → daily/weekly (forward-fill)
   - Glassnode → daily (forward-fill)
   - Futures funding → 8h (forward-fill)
 """
@@ -59,23 +60,7 @@ def load_blocks_range(storage: StorageClient, year: int) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def load_utxo_snapshots(storage: StorageClient, year: int) -> pd.DataFrame:
-    """Charge les snapshots UTXO d'une année."""
-    prefix = f"raw/blockchain/utxo_snapshots/year={year}/"
-    files = storage.list_files(prefix)
-    if not files:
-        return pd.DataFrame()
-
-    dfs = []
-    for f in files:
-        if f.endswith(".parquet"):
-            try:
-                dfs.append(storage.download_parquet(f))
-            except Exception as e:
-                logger.warning(f"Error loading {f}: {e}")
-    if dfs:
-        return pd.concat(dfs, ignore_index=True)
-    return pd.DataFrame()
+# v2: removed — load_utxo_snapshots (UTXO snapshots supprimés, utilité < 3/10 pour horizons 30s-5min)
 
 
 def load_mempool_month(storage: StorageClient, year: int, month: int) -> pd.DataFrame:

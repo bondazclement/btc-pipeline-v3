@@ -31,7 +31,8 @@ from btc_pipeline.processors.bucket_aggregator import (
 from btc_pipeline.processors.feature_engineer import build_features
 from btc_pipeline.processors.temporal_aligner import (
     load_aggtrades_month, load_klines_month, load_blocks_range,
-    load_utxo_snapshots, load_mempool_month, load_funding_month,
+    # v2: removed — load_utxo_snapshots
+    load_mempool_month, load_funding_month,
     load_glassnode_metrics, validate_klines_vs_aggtrades,
 )
 from btc_pipeline.processors.normalizer import normalize_features, compute_feature_stats, save_scaler_state
@@ -126,10 +127,11 @@ def build_month(
     """
     Construit le dataset pour un mois complet.
 
+    v2: priority max = 2 (UTXO et BGeometrics supprimés).
+
     Priority levels :
       1 : aggTrades + blocs + temporel (dataset minimal entraînable)
-      2 : + transactions CDD + futures + mempool
-      3 : + UTXO + Glassnode (dataset complet)
+      2 : + futures + mempool + Glassnode (dataset complet)
     """
     config = config or Config()
     t_start = time.time()
@@ -153,7 +155,6 @@ def build_month(
 
     # ── 3. Load auxiliary data sources ──────────────────────────────────────
     df_blocks = pd.DataFrame()
-    df_utxo = pd.DataFrame()
     df_mempool = pd.DataFrame()
     df_funding = pd.DataFrame()
     glassnode_dfs = {}
@@ -171,7 +172,7 @@ def build_month(
         ]
         logger.info(f"  Blocks loaded: {len(df_blocks):,}")
 
-    # Priority 2: futures, mempool
+    # Priority 2: futures, mempool, Glassnode
     if priority >= 2:
         df_funding = load_funding_month(storage, year, month)
         if not df_funding.empty:
@@ -181,28 +182,24 @@ def build_month(
         if not df_mempool.empty:
             logger.info(f"  Mempool loaded: {len(df_mempool):,} snapshots")
 
-    # Priority 3: UTXO, Glassnode
-    if priority >= 3:
-        df_utxo = load_utxo_snapshots(storage, year)
-        if not df_utxo.empty:
-            logger.info(f"  UTXO snapshots loaded: {len(df_utxo):,}")
-
+        # v2: Glassnode moved from priority 3 to priority 2 (3/10 utilité, on garde tout >= 3/10)
         glassnode_dfs = load_glassnode_metrics(storage, year)
         if glassnode_dfs:
             logger.info(f"  Glassnode metrics loaded: {list(glassnode_dfs.keys())}")
+
+    # v2: removed — Priority 3 (UTXO + BGeometrics, utilité < 3/10)
 
     # ── 4. Feature engineering (merge all sources) ─────────────────────────
     df_features = build_features(
         df_1s,
         df_blocks=df_blocks,
-        df_utxo=df_utxo,
         df_mempool=df_mempool,
         df_funding=df_funding,
         glassnode_dfs=glassnode_dfs,
     )
 
     # Free memory
-    del df_1s, df_blocks, df_utxo, df_mempool, df_funding
+    del df_1s, df_blocks, df_mempool, df_funding
     logger.info(f"  Features built: {len(df_features.columns)} columns")
 
     # ── 5. Normalization ───────────────────────────────────────────────────

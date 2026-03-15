@@ -33,6 +33,10 @@ class StorageClient:
         self.temp_dir = os.path.join(self.workspace, "tmp")
         os.makedirs(self.temp_dir, exist_ok=True)
 
+        # v2: Bug 4 fix — in-memory state cache to avoid excessive GCS reads/writes
+        self._state_cache: Optional[dict] = None
+        self._state_dirty: bool = False
+
         if self.backend == "gcs":
             self._init_gcs()
         else:
@@ -223,14 +227,25 @@ class StorageClient:
         logger.info("Pipeline state saved")
 
     def update_task_state(self, task_name: str, key: str, value) -> None:
-        """Met à jour un champ spécifique dans le state d'une tâche."""
-        state = self.get_pipeline_state()
-        if "tasks" not in state:
-            state["tasks"] = {}
-        if task_name not in state["tasks"]:
-            state["tasks"][task_name] = {}
-        state["tasks"][task_name][key] = value
-        self.save_pipeline_state(state)
+        """
+        Met à jour un champ spécifique dans le state d'une tâche.
+        v2: utilise un cache mémoire pour éviter des milliers de requêtes GCS.
+        Appeler flush_state() après chaque batch pour persister.
+        """
+        if self._state_cache is None:
+            self._state_cache = self.get_pipeline_state()
+        if "tasks" not in self._state_cache:
+            self._state_cache["tasks"] = {}
+        if task_name not in self._state_cache["tasks"]:
+            self._state_cache["tasks"][task_name] = {}
+        self._state_cache["tasks"][task_name][key] = value
+        self._state_dirty = True
+
+    def flush_state(self) -> None:
+        """Persiste le state sur GCS. Appeler après chaque batch."""
+        if self._state_dirty and self._state_cache is not None:
+            self.save_pipeline_state(self._state_cache)
+            self._state_dirty = False
 
     # ═══════════════════════════════════════════════════════════════════════
     # DISK MONITORING
@@ -291,10 +306,9 @@ class StorageClient:
             "raw/binance/futures_funding",
             "raw/binance/live",
             "raw/blockchain/blocks",
-            "raw/blockchain/transactions",
-            "raw/blockchain/utxo_snapshots",
+            # v2: removed — raw/blockchain/transactions, raw/blockchain/utxo_snapshots
             "raw/mempool",
-            "raw/onchain_metrics",
+            "raw/onchain_metrics/glassnode",
             "processed/features_1s",
             "processed/labels",
         ]

@@ -4,8 +4,11 @@ API REST pour historique + WebSocket pour données live.
 
 Métriques collectées :
   - Mempool tx count, vsize, total fees
-  - Fee rate percentiles (p10→p99)
+  - Fee rates par niveau de confirmation (pas de vrais percentiles)
   - Block estimations
+
+v2: les colonnes de frais sont renommées pour refléter leur vraie nature
+    (recommandations de délai de confirmation, pas des percentiles du mempool).
 
 Sources :
   - https://mempool.space/api (REST)
@@ -55,17 +58,18 @@ def fetch_mempool_snapshot(config: Optional[Config] = None) -> dict:
 
         # Estimate fee percentiles from the histogram if available
         # The mempool API gives us basic fee levels
+        # v2: renamed fee columns — these are confirmation delay recommendations,
+        # not true statistical percentiles of the mempool fee distribution
         record = {
             "timestamp": now_ts,
             "mempool_tx_count": stats.get("count", 0),
             "mempool_vsize_bytes": stats.get("vsize", 0),
             "mempool_total_fee_sat": int(stats.get("total_fee", 0) * 1e8) if isinstance(stats.get("total_fee"), float) else stats.get("total_fee", 0),
-            "fee_p10_sat_vbyte": fees.get("minimumFee", 1),
-            "fee_p25_sat_vbyte": fees.get("economyFee", 2),
-            "fee_p50_sat_vbyte": fees.get("hourFee", 5),
-            "fee_p75_sat_vbyte": fees.get("halfHourFee", 10),
-            "fee_p90_sat_vbyte": fees.get("fastestFee", 20),
-            "fee_p99_sat_vbyte": fees.get("fastestFee", 20) * 1.5,  # estimate
+            "fee_minimum_sat_vbyte":  fees.get("minimumFee", 1),      # minimum relay fee
+            "fee_economy_sat_vbyte":  fees.get("economyFee", 2),      # ~1h confirmation
+            "fee_standard_sat_vbyte": fees.get("hourFee", 5),         # ~1h confirmation
+            "fee_priority_sat_vbyte": fees.get("halfHourFee", 10),    # ~30min confirmation
+            "fee_urgent_sat_vbyte":   fees.get("fastestFee", 20),     # next block
             "blocks_estimated_1h": 6,   # ~6 blocks/hour average
             "blocks_estimated_6h": 36,
         }
@@ -201,27 +205,27 @@ async def run_mempool_websocket(
                         # Parse mempool stats from WS messages
                         if "mempoolInfo" in msg:
                             info = msg["mempoolInfo"]
+                            # v2: renamed fee columns to reflect confirmation delay recommendations
                             record = {
                                 "timestamp": int(time.time()),
                                 "mempool_tx_count": info.get("size", 0),
                                 "mempool_vsize_bytes": info.get("bytes", 0),
                                 "mempool_total_fee_sat": 0,  # not directly available
-                                "fee_p10_sat_vbyte": 0,
-                                "fee_p25_sat_vbyte": 0,
-                                "fee_p50_sat_vbyte": 0,
-                                "fee_p75_sat_vbyte": 0,
-                                "fee_p90_sat_vbyte": 0,
-                                "fee_p99_sat_vbyte": 0,
+                                "fee_minimum_sat_vbyte": 0,
+                                "fee_economy_sat_vbyte": 0,
+                                "fee_standard_sat_vbyte": 0,
+                                "fee_priority_sat_vbyte": 0,
+                                "fee_urgent_sat_vbyte": 0,
                                 "blocks_estimated_1h": 0,
                                 "blocks_estimated_6h": 0,
                             }
                             # Get fee rates if available
                             if "fees" in msg:
                                 fees = msg["fees"]
-                                record["fee_p25_sat_vbyte"] = fees.get("economyFee", 0)
-                                record["fee_p50_sat_vbyte"] = fees.get("hourFee", 0)
-                                record["fee_p75_sat_vbyte"] = fees.get("halfHourFee", 0)
-                                record["fee_p90_sat_vbyte"] = fees.get("fastestFee", 0)
+                                record["fee_economy_sat_vbyte"] = fees.get("economyFee", 0)
+                                record["fee_standard_sat_vbyte"] = fees.get("hourFee", 0)
+                                record["fee_priority_sat_vbyte"] = fees.get("halfHourFee", 0)
+                                record["fee_urgent_sat_vbyte"] = fees.get("fastestFee", 0)
 
                             buffer.append(record)
 

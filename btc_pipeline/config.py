@@ -47,13 +47,11 @@ class Config:
     mempool_api_base: str = "https://mempool.space/api"
     mempool_ws_url: str = "wss://mempool.space/api/v1/ws"
 
-    # ── Blockchair ────────────────────────────────────────────────────────
-    blockchair_base: str = "https://gz.blockchair.com/bitcoin"
+    # v2: removed — Blockchair (utilité < 3/10 pour horizons 30s-5min)
 
     # ── Pipeline ──────────────────────────────────────────────────────────
     pipeline_state_path: str = "metadata/pipeline_state.json"
     batch_size_blocks: int = 5000
-    batch_size_transactions: int = 100_000
     ws_flush_interval_s: int = 60
     parquet_compression: str = "snappy"
 
@@ -77,14 +75,13 @@ GCS_PATHS = {
     "live_liquidations": "raw/binance/live/liquidations/year={year}/month={month:02d}/day={day:02d}/{hour:02d}.parquet",
     # Blockchain
     "blockchain_blocks":       "raw/blockchain/blocks/year={year}/blocks_{year}_batch_{batch:04d}.parquet",
-    "blockchain_transactions": "raw/blockchain/transactions/year={year}/month={month:02d}/txs_{year}-{month:02d}_batch_{batch:04d}.parquet",
-    "blockchain_utxo":         "raw/blockchain/utxo_snapshots/year={year}/utxo_snapshot_{date}.parquet",
+    # v2: removed — blockchain_transactions, blockchain_utxo (utilité < 3/10 pour horizons 30s-5min)
     # Mempool
     "mempool_snapshots": "raw/mempool/snapshots/year={year}/month={month:02d}/day={day:02d}/mempool_snapshots.parquet",
     "mempool_fee":       "raw/mempool/fee_history/year={year}/month={month:02d}/fee_history.parquet",
     # On-chain
     "glassnode":   "raw/onchain_metrics/glassnode/metric={metric}/year={year}/daily.parquet",
-    "bgeometrics": "raw/onchain_metrics/bgeometrics/metric={metric}/year={year}/daily.parquet",
+    # v2: removed — bgeometrics (utilité < 3/10 pour horizons 30s-5min)
     # Processed
     "features":   "processed/features_1s/year={year}/month={month:02d}/features_{year}-{month:02d}.parquet",
     "labels":     "processed/labels/year={year}/month={month:02d}/labels_{year}-{month:02d}.parquet",
@@ -128,7 +125,8 @@ KLINE_COLUMNS = [
 
 BLOCK_SCHEMA_DTYPES = {
     "block_height": "int32", "block_hash": "str", "block_timestamp": "int64",
-    "block_version": "int32", "prev_block_hash": "str", "merkle_root": "str",
+    "block_version": "int32",
+    # v2: removed — prev_block_hash, merkle_root (pas utiles pour le ML)
     "tx_count": "int32", "total_input_btc": "float64", "total_output_btc": "float64",
     "total_fees_btc": "float64", "coinbase_reward_btc": "float64",
     "block_size_bytes": "int32", "block_weight": "int32", "block_stripped_size": "int32",
@@ -158,57 +156,21 @@ BLOCK_SCHEMA_DTYPES = {
     "halving_epoch": "int8",
     "difficulty": "float64", "bits": "int32", "nonce": "int32",
     "coinbase_outputs_count": "int8",
-    "coin_days_destroyed_block": "float64",
+    # v2: removed — coin_days_destroyed_block (nécessite transactions individuelles, supprimées en v2)
 }
 
-TRANSACTION_SCHEMA_DTYPES = {
-    "txid": "str", "block_height": "int32", "block_timestamp": "int64",
-    "tx_index_in_block": "int16", "is_coinbase": "bool",
-    "input_count": "int16", "output_count": "int16",
-    "tx_size_bytes": "int32", "tx_vsize_bytes": "int32", "tx_weight": "int32",
-    "total_input_satoshis": "int64", "total_output_satoshis": "int64",
-    "fee_satoshis": "int64", "fee_rate_sat_vbyte": "float32",
-    "has_segwit_input": "bool", "has_taproot_input": "bool",
-    "is_rbf": "bool", "is_consolidation": "bool", "is_batch_payment": "bool",
-    "output_count_p2pkh": "int16", "output_count_p2sh": "int16",
-    "output_count_p2wpkh": "int16", "output_count_p2tr": "int16",
-    "output_count_op_return": "int16",
-    "max_output_satoshis": "int64", "min_output_satoshis": "int64",
-    "coin_days_destroyed": "float64", "avg_input_age_blocks": "float32",
-    "max_input_age_blocks": "int32",
-}
-
-UTXO_SNAPSHOT_SCHEMA_DTYPES = {
-    "snapshot_block_height": "int32", "snapshot_timestamp": "int64",
-    "total_utxo_count": "int64", "total_btc_in_utxos": "float64",
-    "avg_utxo_value_btc": "float64", "median_utxo_value_btc": "float64",
-    "btc_age_below_1d": "float64", "btc_age_1d_7d": "float64",
-    "btc_age_7d_30d": "float64", "btc_age_30d_90d": "float64",
-    "btc_age_90d_180d": "float64", "btc_age_180d_1y": "float64",
-    "btc_age_1y_2y": "float64", "btc_age_2y_3y": "float64",
-    "btc_age_3y_5y": "float64", "btc_age_above_5y": "float64",
-    "utxo_count_age_below_1d": "int64", "utxo_count_age_1d_7d": "int64",
-    "utxo_count_age_7d_30d": "int64", "utxo_count_age_30d_90d": "int64",
-    "utxo_count_age_90d_180d": "int64", "utxo_count_age_180d_1y": "int64",
-    "utxo_count_age_above_1y": "int64",
-    "utxo_count_dust": "int64", "utxo_count_below_001btc": "int64",
-    "utxo_count_001_01btc": "int64", "utxo_count_01_1btc": "int64",
-    "utxo_count_1_10btc": "int64", "utxo_count_10_100btc": "int64",
-    "utxo_count_above_100btc": "int64",
-    "btc_held_by_dust": "float64", "btc_held_below_001btc": "float64",
-    "btc_held_001_01btc": "float64", "btc_held_01_1btc": "float64",
-    "btc_held_1_10btc": "float64", "btc_held_10_100btc": "float64",
-    "btc_held_above_100btc": "float64",
-    "liveliness": "float64", "coin_days_destroyed_7d": "float64",
-    "dormancy_7d": "float64", "realized_cap_usd": "float64",
-}
+# v2: removed — TRANSACTION_SCHEMA_DTYPES (utilité < 3/10 pour horizons 30s-5min)
+# v2: removed — UTXO_SNAPSHOT_SCHEMA_DTYPES (utilité < 3/10 pour horizons 30s-5min)
 
 MEMPOOL_SCHEMA_DTYPES = {
     "timestamp": "int64", "mempool_tx_count": "int32",
     "mempool_vsize_bytes": "int64", "mempool_total_fee_sat": "int64",
-    "fee_p10_sat_vbyte": "float32", "fee_p25_sat_vbyte": "float32",
-    "fee_p50_sat_vbyte": "float32", "fee_p75_sat_vbyte": "float32",
-    "fee_p90_sat_vbyte": "float32", "fee_p99_sat_vbyte": "float32",
+    # v2: renamed fee columns — these are confirmation delay recommendations, not true percentiles
+    "fee_minimum_sat_vbyte": "float32",
+    "fee_economy_sat_vbyte": "float32",
+    "fee_standard_sat_vbyte": "float32",
+    "fee_priority_sat_vbyte": "float32",
+    "fee_urgent_sat_vbyte": "float32",
     "blocks_estimated_1h": "int8", "blocks_estimated_6h": "int8",
 }
 
