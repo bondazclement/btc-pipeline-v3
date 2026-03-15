@@ -75,7 +75,7 @@ def merge_block_features(df_1s: pd.DataFrame, df_blocks: pd.DataFrame) -> pd.Dat
         "segwit_tx_ratio", "taproot_tx_ratio",
         "utxo_net_change", "seconds_since_prev_block",
         "difficulty", "halving_epoch", "blocks_since_halving",
-        "coin_days_destroyed_block",
+        # v2: removed — coin_days_destroyed_block (toujours 0, nécessite transactions)
     ]
 
     # Filter available columns
@@ -96,12 +96,6 @@ def merge_block_features(df_1s: pd.DataFrame, df_blocks: pd.DataFrame) -> pd.Dat
         df_1s, blocks, on="timestamp_s", direction="backward"
     )
 
-    # Compute derived block features
-    if "block_coin_days_destroyed_block" in result.columns:
-        # CDD rolling 7d (approximation: ~6*24*7 blocks)
-        # Since we forward-fill, we compute rolling on the block-level data first
-        pass
-
     # Whale / retail ratios from block data
     if "tx_count_above_100btc" in df_blocks.columns:
         whale_blocks = df_blocks[["block_timestamp", "tx_count_above_100btc", "tx_count",
@@ -120,62 +114,7 @@ def merge_block_features(df_1s: pd.DataFrame, df_blocks: pd.DataFrame) -> pd.Dat
     return result
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# UTXO FEATURES (forward-filled from weekly/daily resolution)
-# ═══════════════════════════════════════════════════════════════════════════
-
-def merge_utxo_features(df_1s: pd.DataFrame, df_utxo: pd.DataFrame) -> pd.DataFrame:
-    """
-    Fusionne les métriques UTXO sur le DataFrame 1s.
-    Forward-fill depuis des snapshots hebdomadaires/quotidiens.
-    """
-    if df_utxo.empty:
-        logger.warning("No UTXO data to merge")
-        return df_1s
-
-    utxo = df_utxo.copy()
-
-    # Compute ratios
-    total_btc = utxo["total_btc_in_utxos"].replace(0, np.nan)
-
-    utxo["utxo_btc_age_below_7d_ratio"] = (
-        (utxo.get("btc_age_below_1d", 0) + utxo.get("btc_age_1d_7d", 0)) / total_btc
-    ).fillna(0)
-
-    utxo["utxo_btc_age_above_1y_ratio"] = (
-        (utxo.get("btc_age_1y_2y", 0) + utxo.get("btc_age_2y_3y", 0) +
-         utxo.get("btc_age_3y_5y", 0) + utxo.get("btc_age_above_5y", 0)) / total_btc
-    ).fillna(0)
-
-    utxo["utxo_btc_age_above_2y_ratio"] = (
-        (utxo.get("btc_age_2y_3y", 0) + utxo.get("btc_age_3y_5y", 0) +
-         utxo.get("btc_age_above_5y", 0)) / total_btc
-    ).fillna(0)
-
-    # Select features for merge
-    utxo_cols = ["snapshot_timestamp", "utxo_btc_age_below_7d_ratio",
-                 "utxo_btc_age_above_1y_ratio", "utxo_btc_age_above_2y_ratio",
-                 "liveliness", "dormancy_7d", "realized_cap_usd",
-                 "total_utxo_count", "total_btc_in_utxos"]
-
-    available = [c for c in utxo_cols if c in utxo.columns]
-    utxo_merge = utxo[available].copy()
-    utxo_merge = utxo_merge.rename(columns={"snapshot_timestamp": "timestamp_s"})
-    utxo_merge = utxo_merge.sort_values("timestamp_s")
-
-    # Prefix
-    rename_map = {c: f"utxo_{c}" if not c.startswith("utxo_") and c != "timestamp_s" else c
-                  for c in utxo_merge.columns}
-    utxo_merge = utxo_merge.rename(columns=rename_map)
-
-    result = pd.merge_asof(
-        df_1s.sort_values("timestamp_s"),
-        utxo_merge,
-        on="timestamp_s",
-        direction="backward",
-    )
-
-    return result
+# v2: removed — merge_utxo_features (UTXO snapshots supprimés, utilité < 3/10 pour horizons 30s-5min)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -188,8 +127,15 @@ def merge_mempool_features(df_1s: pd.DataFrame, df_mempool: pd.DataFrame) -> pd.
         logger.warning("No mempool data to merge")
         return df_1s
 
-    mempool = df_mempool[["timestamp", "mempool_tx_count", "mempool_vsize_bytes",
-                           "fee_p50_sat_vbyte", "fee_p90_sat_vbyte"]].copy()
+    # v2: updated column names to match renamed mempool fee columns
+    fee_cols = []
+    for c in ["fee_standard_sat_vbyte", "fee_urgent_sat_vbyte",
+              "fee_p50_sat_vbyte", "fee_p90_sat_vbyte"]:
+        if c in df_mempool.columns:
+            fee_cols.append(c)
+    base_cols = ["timestamp", "mempool_tx_count", "mempool_vsize_bytes"]
+    available_cols = [c for c in base_cols + fee_cols if c in df_mempool.columns]
+    mempool = df_mempool[available_cols].copy()
     mempool = mempool.rename(columns={"timestamp": "timestamp_s"})
 
     # Prefix
@@ -302,7 +248,6 @@ def merge_futures_features(df_1s: pd.DataFrame, df_funding: pd.DataFrame,
 def build_features(
     df_1s: pd.DataFrame,
     df_blocks: pd.DataFrame = None,
-    df_utxo: pd.DataFrame = None,
     df_mempool: pd.DataFrame = None,
     df_funding: pd.DataFrame = None,
     glassnode_dfs: dict = None,
@@ -310,6 +255,8 @@ def build_features(
     """
     Pipeline complet de feature engineering.
     Prend le DataFrame 1s (aggTrades agrégés) et fusionne toutes les sources.
+
+    v2: paramètre df_utxo supprimé (UTXO snapshots retirés du pipeline).
     """
     logger.info(f"Building features for {len(df_1s):,} timesteps")
 
@@ -324,12 +271,9 @@ def build_features(
         result = merge_block_features(result, df_blocks)
         logger.info(f"  ✓ Block features merged")
 
-    # 3. UTXO features
-    if df_utxo is not None and not df_utxo.empty:
-        result = merge_utxo_features(result, df_utxo)
-        logger.info(f"  ✓ UTXO features merged")
+    # v2: removed — UTXO features merge (utilité < 3/10 pour horizons 30s-5min)
 
-    # 4. Mempool features
+    # 3. Mempool features
     if df_mempool is not None and not df_mempool.empty:
         result = merge_mempool_features(result, df_mempool)
         logger.info(f"  ✓ Mempool features merged")
@@ -347,7 +291,7 @@ def build_features(
     # 7. Forward-fill all remaining NaNs (from merge_asof)
     result = result.ffill()
 
-    # 8. Count features and NaN ratio
+    # Count features and NaN ratio
     n_features = len([c for c in result.columns if c != "timestamp_s"])
     nan_ratio = result.isna().sum().sum() / (len(result) * len(result.columns))
     logger.info(f"  Total features: {n_features}, NaN ratio: {nan_ratio:.4%}")

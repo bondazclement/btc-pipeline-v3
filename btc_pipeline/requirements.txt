@@ -1,0 +1,17 @@
+polars>=0.19
+pandas>=2.0
+pyarrow>=14.0
+google-cloud-storage>=2.10
+gcsfs>=2023.10
+aiohttp>=3.9
+websockets>=12.0
+python-bitcoinrpc>=1.0
+loguru>=0.7
+tqdm>=4.0
+ipywidgets>=8.0
+python-dateutil>=2.8
+requests>=2.31
+numpy>=1.26
+nest_asyncio>=1.5
+papermill>=2.4
+matplotlib>=3.7

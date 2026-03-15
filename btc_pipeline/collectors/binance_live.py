@@ -150,7 +150,12 @@ class StreamBuffer:
         return (time.time() - self.last_flush) >= self.flush_interval and len(self.buffer) > 0
 
     def flush(self) -> int:
-        """Flush le buffer vers GCS. Retourne le nombre de rows flushées."""
+        """
+        Flush le buffer vers GCS. Retourne le nombre de rows flushées.
+
+        v2: Bug 1 fix — chaque flush génère un fichier unique (timestamp Unix dans le nom)
+        pour éviter la perte de données par écrasement du fichier horaire.
+        """
         if not self.buffer:
             return 0
 
@@ -158,13 +163,15 @@ class StreamBuffer:
         now = datetime.now(timezone.utc)
 
         gcs_key = STREAMS[self.stream_name]["gcs_key"]
+        # v2: fichier unique par flush avec timestamp Unix pour éviter les écrasements
         gcs_path = GCS_PATHS[gcs_key].format(
             year=now.year, month=now.month, day=now.day, hour=now.hour
         )
+        # Ajouter un timestamp unique au chemin pour éviter la perte de données
+        # Transformer path/to/HH.parquet → path/to/HH_{ts}.parquet
+        ts_suffix = int(now.timestamp())
+        gcs_path = gcs_path.replace(".parquet", f"_{ts_suffix}.parquet")
 
-        # Pour les fichiers horaires, on append (ou on écrase le dernier)
-        # Stratégie : un fichier par heure, on écrase à chaque flush
-        # (les données de la même heure sont cumulées dans le buffer)
         size = self.storage.stream_upload_parquet(df, gcs_path, skip_if_exists=False)
 
         rows = len(self.buffer)

@@ -21,6 +21,7 @@ Ils ne doivent JAMAIS être inclus comme features (data leakage).
 """
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
 from loguru import logger
 
@@ -31,6 +32,31 @@ HORIZONS = {
     "3m": 180,
     "5m": 300,
 }
+
+
+def _compute_sigma_vectorized(returns: np.ndarray, horizon: int) -> np.ndarray:
+    """
+    Calcule la volatilité réalisée forward (std des returns 1s) sur `horizon` pas, vectorisé.
+
+    v2: remplace la boucle Python O(n*horizon) par numpy sliding_window_view.
+    Pour 250M lignes × 300 secondes, passe de dizaines d'heures à quelques minutes.
+    """
+    # On veut std(returns[i+1 : i+1+horizon]) pour chaque i
+    if len(returns) <= horizon:
+        return np.full(len(returns), np.nan)
+
+    # Fenêtre glissante sur returns[1:] pour obtenir les fenêtres forward
+    forward_returns = returns[1:]  # décalage de 1 pour exclure le return courant
+    if len(forward_returns) < horizon:
+        return np.full(len(returns), np.nan)
+
+    windows = sliding_window_view(forward_returns, horizon)
+    sigma = windows.std(axis=1)
+
+    # Aligner : sigma[i] correspond à std(returns[i+1:i+1+horizon])
+    result = np.full(len(returns), np.nan)
+    result[:len(sigma)] = sigma
+    return result
 
 
 def generate_labels(df: pd.DataFrame) -> pd.DataFrame:
@@ -56,16 +82,8 @@ def generate_labels(df: pd.DataFrame) -> pd.DataFrame:
         labels[f"mu_{name}"] = mu.values
 
         # ── Volatilité réalisée (sigma) : std des returns 1s sur l'horizon ─
-        # Rolling std forward = shift + rolling backward
-        returns_series = pd.Series(returns_1s)
-        # We need std of the NEXT `horizon` returns
-        sigma = returns_series.shift(-horizon).rolling(horizon, min_periods=max(1, horizon // 2)).std()
-        # Actually: compute std of returns from t to t+horizon
-        sigma_vals = np.full(len(close), np.nan)
-        for i in range(len(close) - horizon):
-            window = returns_1s[i + 1: i + 1 + horizon]
-            if len(window) >= max(1, horizon // 2):
-                sigma_vals[i] = np.std(window)
+        # v2: Bug 2 fix — vectorisé avec sliding_window_view au lieu d'une boucle Python O(n*horizon)
+        sigma_vals = _compute_sigma_vectorized(returns_1s, horizon)
         labels[f"sigma_{name}"] = sigma_vals
 
         # ── Direction : 1 si hausse, 0 si baisse ─────────────────────────

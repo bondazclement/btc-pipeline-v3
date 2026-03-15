@@ -1,10 +1,11 @@
 """
-Glassnode + BGeometrics On-Chain Metrics Collector
-Métriques journalières : SOPR, active addresses, exchange flows, hashrate, MVRV Z-Score.
+Glassnode On-Chain Metrics Collector
+Métriques journalières : SOPR, active addresses, exchange flows, hashrate.
 
-Sources :
+v2: BGeometrics supprimé (utilité < 3/10 pour horizons 30s-5min).
+
+Source :
   - Glassnode free tier API (résolution journalière)
-  - BGeometrics free API (MVRV Z-Score, Puell Multiple)
 """
 
 import time
@@ -144,94 +145,10 @@ def run_glassnode_collection(
 
     storage.update_task_state("glassnode", "metrics_collected", stats["metrics_collected"])
     storage.update_task_state("glassnode", "last_run", datetime.now(timezone.utc).isoformat())
+    storage.flush_state()  # v2: persist state after collection
 
     return stats
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BGEOMETRICS — MVRV Z-Score, Puell Multiple
-# ═══════════════════════════════════════════════════════════════════════════
-
-BGEOMETRICS_METRICS = {
-    "mvrv_zscore": "https://bitcoin-data.com/v1/mvrv-zscore",
-    "puell_multiple": "https://bitcoin-data.com/v1/puell-multiple",
-    "pi_cycle_top": "https://bitcoin-data.com/v1/pi-cycle-top",
-    "golden_ratio": "https://bitcoin-data.com/v1/golden-ratio-multiplier",
-}
-
-
-def fetch_bgeometrics_metric(metric_name: str) -> pd.DataFrame:
-    """Récupère une métrique depuis BGeometrics/bitcoin-data.com."""
-    if metric_name not in BGEOMETRICS_METRICS:
-        raise ValueError(f"Unknown BGeometrics metric: {metric_name}")
-
-    url = BGEOMETRICS_METRICS[metric_name]
-
-    try:
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logger.error(f"BGeometrics error for {metric_name}: {e}")
-        return pd.DataFrame()
-
-    if not data:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(data)
-    df["metric"] = metric_name
-    return df
-
-
-def run_bgeometrics_collection(
-    storage: StorageClient,
-    metrics: Optional[list[str]] = None,
-    progress_callback=None,
-) -> dict:
-    """Collecte toutes les métriques BGeometrics."""
-    metrics = metrics or list(BGEOMETRICS_METRICS.keys())
-    stats = {"metrics_collected": 0, "total_rows": 0, "total_bytes": 0}
-
-    for i, metric_name in enumerate(metrics):
-        logger.info(f"Fetching BGeometrics: {metric_name} ({i+1}/{len(metrics)})")
-
-        df = fetch_bgeometrics_metric(metric_name)
-        if df.empty:
-            continue
-
-        # Try to extract year from date column
-        date_col = None
-        for c in df.columns:
-            if "date" in c.lower() or "time" in c.lower() or c == "d":
-                date_col = c
-                break
-
-        if date_col:
-            df["_date"] = pd.to_datetime(df[date_col], errors="coerce")
-            df["year"] = df["_date"].dt.year
-
-            for year, year_df in df.groupby("year"):
-                if pd.isna(year):
-                    continue
-                gcs_path = GCS_PATHS["bgeometrics"].format(metric=metric_name, year=int(year))
-                year_df_clean = year_df.drop(columns=["_date", "year"], errors="ignore")
-                size = storage.stream_upload_parquet(year_df_clean, gcs_path, skip_if_exists=False)
-                stats["total_bytes"] += size
-        else:
-            gcs_path = f"raw/onchain_metrics/bgeometrics/metric={metric_name}/all.parquet"
-            size = storage.stream_upload_parquet(df, gcs_path, skip_if_exists=False)
-            stats["total_bytes"] += size
-
-        stats["metrics_collected"] += 1
-        stats["total_rows"] += len(df)
-
-        if progress_callback:
-            progress_callback(i + 1, len(metrics), {"metric": metric_name})
-
-        time.sleep(1)
-
-    stats["total_gb"] = stats["total_bytes"] / 1e9
-    logger.info(f"✅ BGeometrics done: {stats['metrics_collected']} metrics, {stats['total_rows']:,} rows")
-
-    storage.update_task_state("bgeometrics", "metrics_collected", stats["metrics_collected"])
-    return stats
+# v2: removed — BGEOMETRICS_METRICS, fetch_bgeometrics_metric, run_bgeometrics_collection
+#     (utilité < 3/10 pour horizons 30s-5min)
